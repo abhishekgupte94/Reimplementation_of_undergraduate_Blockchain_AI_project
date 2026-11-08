@@ -77,11 +77,14 @@ def main():
             backup.chmod(0o600)
             engine = create_engine(URL.create("sqlite", database=str(backup)))
             with engine.connect() as reader:
-                available = set(inspect(engine).get_table_names())
+                source_schema = inspect(reader)
+                available = set(source_schema.get_table_names())
                 for table in db.metadata.sorted_tables:
                     if table.name not in available or table.name == "ledger_state":
                         continue
-                    rows = [dict(row) for row in reader.execute(select(table)).mappings()]
+                    source_columns = {col["name"] for col in source_schema.get_columns(table.name)}
+                    columns = [column for column in table.columns if column.name in source_columns]
+                    rows = [dict(row) for row in reader.execute(select(*columns)).mappings()]
                     if rows:
                         db.session.execute(table.insert(), rows)
                     counts[table.name] = len(rows)

@@ -6,6 +6,7 @@ commitment history; it is single-node and resettable, not distributed immutabili
 
 import hashlib
 import json
+import sqlite3
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -19,7 +20,13 @@ from ..models import AuditEntry, LedgerAnchor, LedgerState, utcnow
 
 GENESIS = "0" * 64
 PREFIX = b"ROOMAUDITv1:"
-AUDITED_TABLES = ("recognition_event", "presence_interval", "weapon_alert")
+AUDITED_TABLES = (
+    "recognition_event",
+    "presence_interval",
+    "weapon_alert",
+    "room_arrival",
+    "emotion_observation",
+)
 
 
 class LedgerError(RuntimeError):
@@ -115,6 +122,28 @@ def audit_source(record, kind=None):
     return enqueue_audit(
         kind or f"{table}.snapshot", payload, source_type=table, source_id=record.id
     )
+
+
+def reserve_audit_write():
+    """Fail fast on competing writers when optional inference needs to persist."""
+    connection = db.session.connection()
+    if connection.dialect.name == "sqlite":
+        timeout = connection.exec_driver_sql("PRAGMA busy_timeout").scalar_one()
+        connection.exec_driver_sql("PRAGMA busy_timeout=0")
+        try:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+        finally:
+            connection.exec_driver_sql(f"PRAGMA busy_timeout={int(timeout)}")
+    elif connection.dialect.name == "mysql":
+        db.session.execute(
+            db.select(LedgerState.id).where(LedgerState.id == 1).with_for_update(nowait=True)
+        ).scalar()
+
+
+def audit_write_is_busy(error):
+    sqlite_code = getattr(error.orig, "sqlite_errorcode", 0) & 0xFF
+    mysql_code = error.orig.args[0] if error.orig.args else None
+    return sqlite_code in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED) or mysql_code == 3572
 
 
 def rpc(method, params=None):

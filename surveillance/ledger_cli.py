@@ -57,9 +57,14 @@ def register_ledger_cli(app):
     @app.cli.command("ledger-backfill")
     def backfill():
         """Snapshot existing observations once when migrating a pre-ledger database."""
-        from .models import PresenceInterval, RecognitionEvent
+        from .models import EmotionObservation, PresenceInterval, RecognitionEvent, RoomArrival
 
-        classes = {"recognition_event": RecognitionEvent, "presence_interval": PresenceInterval}
+        classes = {
+            "recognition_event": RecognitionEvent,
+            "presence_interval": PresenceInterval,
+            "room_arrival": RoomArrival,
+            "emotion_observation": EmotionObservation,
+        }
         if "weapon_alert" in db.metadata.tables:
             from .weapon_models import WeaponAlert
 

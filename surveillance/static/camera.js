@@ -6,6 +6,7 @@ const startButton = document.getElementById("start-camera");
 const stopButton = document.getElementById("stop-camera");
 const sampler = document.createElement("canvas");
 const weaponStatus = document.getElementById("weapon-status");
+const emotionStatus = document.getElementById("emotion-status");
 let room = 1, stream = null, capture = null, timer = null;
 let pendingFrame = null, sequence = 0, epoch = 0, changing = false, starting = false;
 
@@ -37,6 +38,7 @@ async function stopCamera(message = "Webcam stopped.", beacon = false) {
   startButton.disabled = starting;
   statusLine.textContent = message;
   weaponStatus.textContent = "SSD pen detection stopped.";
+  if (emotionStatus) emotionStatus.textContent = "Expression sampling stopped.";
   if (old) {
     if (beacon) {
       const body = new FormData();
@@ -61,13 +63,14 @@ function drawFaces(data) {
     const color = face.user_id === null ? "#ffcb66" : "#66e6a4";
     context.strokeStyle = color;
     context.strokeRect(x, y, width, height);
-    const labelWidth = Math.min(Math.ceil(context.measureText(face.name).width) + 8, data.width);
+    const label = face.emotion ? `${face.name} · ${face.emotion}` : face.name;
+    const labelWidth = Math.min(Math.ceil(context.measureText(label).width) + 8, data.width);
     const labelX = Math.min(x, data.width - labelWidth);
     const labelY = y >= 18 ? y - 18 : y;
     context.fillStyle = "#142033";
     context.fillRect(labelX, labelY, labelWidth, 16);
     context.fillStyle = color;
-    context.fillText(face.name, labelX + 4, labelY + 12, labelWidth - 8);
+    context.fillText(label, labelX + 4, labelY + 12, labelWidth - 8);
   }
   context.lineWidth = 2;
   context.font = "16px system-ui";
@@ -100,6 +103,19 @@ async function sendFrame(frameEpoch) {
     drawFaces(data);
     const known = [...new Set(data.faces.filter(face => face.user_id !== null).map(face => face.name))];
     statusLine.textContent = `Room ${room} · ${data.mode} · ${known.length ? `Recognised: ${known.join(", ")}` : "No enrolled face recognised"}`;
+    if (emotionStatus) {
+      const estimates = data.faces.filter(face => face.emotion)
+        .map(face => `${face.name} · ${face.emotion}`);
+      const expression = data.emotion || {status: "unavailable"};
+      const status = {
+        ready: estimates.join(", ") || "No confident expression estimate.",
+        waiting: "Waiting for a confirmed face.",
+        sampling: "Sampling expressions.",
+        disabled: "Expression estimates are disabled.",
+        unavailable: expression.message || "Expression model unavailable.",
+      };
+      emotionStatus.textContent = status[expression.status];
+    }
     const weapons = data.weapons || {status: "unavailable", detections: []};
     weaponStatus.textContent = weapons.status === "ready"
       ? `SSD · ${weapons.detections.length ? "Pen observed in a recent frame" : "No pen detected in the latest sample"}`
@@ -172,6 +188,7 @@ document.querySelectorAll("[data-room]").forEach(tab => tab.addEventListener("cl
     setRoom(next);
     statusLine.textContent = `Room ${room} selected. Waiting for fresh recognition…`;
     weaponStatus.textContent = "SSD waiting for a sample from the selected room.";
+    if (emotionStatus) emotionStatus.textContent = "Waiting for a confirmed face in this room.";
   } catch (error) { await stopCamera(`Room switch failed: ${error.message}`); }
   finally {
     changing = false;

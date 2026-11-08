@@ -2,7 +2,7 @@
 const chart = document.getElementById("room-chart");
 if (chart) {
   const context = chart.getContext("2d");
-  const values = [Number(chart.dataset.roomOne), Number(chart.dataset.roomTwo)];
+  const values = [Number(chart.dataset.roomOneCount), Number(chart.dataset.roomTwoCount)];
   const style = getComputedStyle(chart);
   const colors = [style.getPropertyValue("--room-one"), style.getPropertyValue("--room-two")];
   const total = values.reduce((sum, value) => sum + value, 0);

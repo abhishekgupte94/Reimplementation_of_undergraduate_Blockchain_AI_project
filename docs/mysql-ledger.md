@@ -1,18 +1,18 @@
 # MySQL plus a local Ethereum audit ledger
 
-The live configuration now uses **MySQL 8.4 LTS** for accounts, enrollment metadata, recognised observations, confirmed visits, model pointers and weapon alerts. The existing rule-based chatbot and room charts continue querying SQLAlchemy/MySQL; they never wait for a blockchain query.
+The demo uses **MySQL 8.4 LTS** for accounts, enrollment metadata, room arrivals, facial expression observations, model pointers and weapon alerts. The rule-based chatbot and room charts read through SQLAlchemy.
 
 The second store is **Anvil 1.7.1**, Foundry's local Ethereum development node, on `127.0.0.1:8545`, chain ID `31337`. It is a real EVM development blockchain with blocks and mined transactions. It is a single-node demonstration, resettable by its operator, and does **not** provide independent-validator or production immutability guarantees. A local SQL hash chain by itself is an audit ledger, not a distributed blockchain; this implementation additionally anchors its commitments to Anvil.
 
 ## Why this pairing
 
-- MySQL remains the efficient, indexed source for joins, participant/date filters and chatbot responses.
-- Observation/presence/weapon writes enqueue a canonical snapshot and hash-linked audit entry in the **same SQL transaction**. An outbox row accompanies each entry. If the SQL transaction rolls back, neither the operational write nor its commitment is retained.
-- A separate ledger worker sends only `ROOMAUDITv1:` plus the 32-byte SHA-256 commitment in an Ethereum transaction to its own local development account. Photos, names, embeddings, room labels and raw observation payloads are not submitted to the blockchain.
+- MySQL provides indexed queries for participant and date filters and chatbot responses.
+- Arrival, expression and weapon alert writes enqueue a canonical snapshot, hash-linked audit entry and outbox row in the **same SQL transaction**. A rollback discards them together.
+- A separate ledger worker sends only `ROOMAUDITv1:` plus the 32-byte SHA-256 commitment in an Ethereum transaction to its local development account.
 - RPC failure leaves a pending retry in MySQL. Capture, face training, reporting and the chatbot continue operating while Anvil is unavailable. Exponential retries cap at 300 seconds; pending items survive restarts.
 - This avoids forcing a slow or unavailable secondary store into the camera request transaction. It also avoids placing identity records into public immutable storage.
 
-This is a design inference from the sources below, rather than a claim that a blockchain is needed for room-duration computation. The chain serves evidence verification; MySQL serves the product queries.
+The chain provides a way to verify audit evidence independently of the SQL query path.
 
 ## Start and stop
 
@@ -58,7 +58,7 @@ flask --app surveillance ledger-verify
 flask --app surveillance ledger-verify --chain
 ```
 
-Local verification checks contiguous audit sequence, each payload/header hash, previous-hash links, and the stored head. It also compares the **latest audited full-column snapshot** against every current `recognition_event`, `presence_interval` and `weapon_alert` row. Missing, changed, deleted or unaudited operational rows fail verification. Persisted values are read back before canonicalization, including MySQL's actual floating-point representation and UTC microseconds, so the verifier hashes the stored values rather than unpersisted input values.
+Local verification checks contiguous audit sequence, each payload/header hash, previous-hash links and the stored head. It compares the **latest audited full-column snapshot** against each `room_arrival`, `emotion_observation` and `weapon_alert` row and the historical `recognition_event` and `presence_interval` rows. Missing, changed, deleted or unaudited operational rows fail verification. The verifier hashes the persisted values, including MySQL's floating-point representation and UTC microseconds.
 
 Chain verification additionally checks chain ID/genesis, mined receipts, transaction payloads and block numbers. It scans this dedicated development chain for prefixed commitments absent from SQL, so deleting a suffix of SQL audit/outbox/source rows and rewriting the SQL head does not silently pass while the chain still contains those commitments. Duplicate identical anchor transactions are harmless; a worker crash immediately after broadcast can lead to a duplicate on retry.
 

@@ -5,7 +5,7 @@
 <div class="page-heading">
   <p class="eyebrow">Participant workspace</p>
   <h1>Simulated room cameras</h1>
-  <p>Both rooms use this device’s webcam. Time starts counting once your face is recognised in the selected room.</p>
+  <p>Both rooms use this device’s webcam. The app records an arrival when it recognises you in a new room.</p>
 </div>
 <section class="panel camera-card">
   <div class="tabs" role="tablist" aria-label="Simulated room">
@@ -15,17 +15,19 @@
   <div id="camera-panel" role="tabpanel" aria-labelledby="room-1">
     <h2 id="room-heading">Room 1 · Camera slot 1</h2>
     <div class="camera-layout">
-      <div class="video-wrap"><video id="webcam" autoplay playsinline muted></video><canvas id="overlay" aria-label="Face recognition boxes"></canvas></div>
+      <div class="video-wrap"><video id="webcam" autoplay playsinline muted></video><canvas id="overlay" aria-label="Face recognition boxes and expression estimates"></canvas></div>
       <div class="camera-controls">
         <h3>Capture controls</h3>
         <div class="actions"><button id="start-camera" type="button">Start webcam</button><button id="stop-camera" class="secondary" type="button" disabled>Stop webcam</button></div>
         <div class="camera-readout">
           <h3>Face tracking</h3>
           <p id="camera-status" role="status" aria-live="polite">Complete face enrollment before starting.</p>
+          <h3>Facial expression estimates</h3>
+          <p id="emotion-status" role="status" aria-live="polite">Waiting for the webcam.</p>
           <h3>SSD simulation</h3>
           <p id="weapon-status" role="status" aria-live="polite">The SSD simulation looks for a pen alongside face tracking.</p>
         </div>
-        <p class="muted">Two matching frames confirm presence. Gaps up to three seconds count toward the same visit. Leaving the page stops capture.</p>
+        <p class="muted">Two matching frames confirm an arrival. Your last known room stays the same until the other camera confirms you.</p>
         {% if not request.is_secure and request.host.split(':')[0] not in ('localhost', '127.0.0.1') %}
           <p class="notice">Open the app over trusted HTTPS to use this device’s webcam.</p>
         {% endif %}

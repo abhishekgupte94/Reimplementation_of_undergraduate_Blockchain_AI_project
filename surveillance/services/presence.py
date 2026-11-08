@@ -6,8 +6,9 @@ from filelock import FileLock
 from flask import abort, current_app
 
 from ..extensions import db
-from ..models import CaptureSession, PresenceInterval, RecognitionEvent, RuntimeState, utcnow
+from ..models import CaptureSession, PresenceInterval, RoomArrival, RuntimeState, utcnow
 from .ledger import audit_source
+from .reporting import last_known_room
 
 
 def now():
@@ -39,24 +40,8 @@ def locked_state():
             raise
 
 
-def intervals_for(capture_id):
-    return list(
-        db.session.scalars(
-            db.select(PresenceInterval).where(
-                PresenceInterval.capture_id == capture_id, PresenceInterval.ended_at.is_(None)
-            )
-        )
-    )
-
-
-def close_intervals(capture):
-    for interval in intervals_for(capture.id):
-        interval.ended_at = interval.last_seen
-        audit_source(interval)
-
-
 def finish_capture(state, capture, timestamp):
-    close_intervals(capture)
+    capture.arrival_candidates = None
     capture.ended_at = timestamp
     state.active_capture_id = None
 
@@ -73,12 +58,6 @@ def expire_capture(state, timestamp):
         ]:
             finish_capture(state, capture, timestamp)
             return None
-        for interval in intervals_for(capture.id):
-            if (timestamp - interval.last_seen).total_seconds() > current_app.config[
-                "PRESENCE_GRACE_SECONDS"
-            ]:
-                interval.ended_at = interval.last_seen
-                audit_source(interval)
     return capture
 
 
@@ -129,48 +108,41 @@ def require_capture(state, user_id, data):
 
 
 def record_observations(capture, model_id, observations, timestamp):
-    active = {interval.user_id: interval for interval in intervals_for(capture.id)}
-    grace = current_app.config["PRESENCE_GRACE_SECONDS"]
-    for user_id, interval in active.items():
-        if (timestamp - interval.last_seen).total_seconds() > grace:
-            interval.ended_at = interval.last_seen
-            audit_source(interval)
-        elif user_id not in observations:
-            interval.consecutive = 0
+    # Keep unconfirmed matches only for the next frame in this capture generation.
+    previous = capture.arrival_candidates or {}
+    gap = (timestamp - capture.last_frame_at).total_seconds()
+    max_gap = current_app.config["PRESENCE_GRACE_SECONDS"]
+    scores = previous.get("scores", {}) if previous.get("model_id") == model_id else {}
+    if not 0 <= gap <= max_gap:
+        scores = {}
+
+    candidates = {}
+    confirmed = set()
     for user_id, distance in observations.items():
-        event = RecognitionEvent(
-            user_id=user_id,
-            capture_id=capture.id,
-            model_id=model_id,
-            room=capture.room,
-            observed_at=timestamp,
-            score=distance,
-        )
-        db.session.add(event)
-        interval = active.get(user_id)
-        if interval is None or interval.ended_at is not None:
-            interval = PresenceInterval(
+        if last_known_room(user_id) == capture.room:
+            confirmed.add(user_id)
+            continue
+        key = str(user_id)
+        if key in scores:
+            arrival = RoomArrival(
                 user_id=user_id,
                 capture_id=capture.id,
+                model_id=model_id,
                 room=capture.room,
-                first_seen=timestamp,
-                last_seen=timestamp,
-                consecutive=1,
-                confirmed=False,
+                arrived_at=capture.last_frame_at,
+                score=scores[key],
             )
-            db.session.add(interval)
+            db.session.add(arrival)
+            audit_source(arrival)
+            confirmed.add(user_id)
         else:
-            if not interval.confirmed and interval.consecutive == 0:
-                interval.first_seen = timestamp
-            interval.consecutive += 1
-            interval.last_seen = timestamp
-            if interval.consecutive >= 2:
-                interval.confirmed = True
-        audit_source(event)
-        audit_source(interval)
-    for user_id, interval in active.items():
-        if user_id not in observations:
-            audit_source(interval)
+            candidates[key] = distance
+
+    capture.arrival_candidates = (
+        {"model_id": model_id, "scores": candidates} if candidates else None
+    )
+    capture.last_frame_at = timestamp
+    return confirmed
 
 
 def stop_user_capture(user_id):
@@ -186,7 +158,7 @@ def reap_capture():
 
 
 def recover_capture_on_server_start():
-    """The first web request closes a previous process's lease at its last sighting."""
+    """Release a previous process's lease and finalise any pre-upgrade intervals."""
     with locked_state() as state:
         capture = (
             db.session.get(CaptureSession, state.active_capture_id)
@@ -194,4 +166,12 @@ def recover_capture_on_server_start():
             else None
         )
         if capture:
+            intervals = db.session.scalars(
+                db.select(PresenceInterval).where(
+                    PresenceInterval.capture_id == capture.id, PresenceInterval.ended_at.is_(None)
+                )
+            ).all()
+            for interval in intervals:
+                interval.ended_at = interval.last_seen
+                audit_source(interval)
             finish_capture(state, capture, now())

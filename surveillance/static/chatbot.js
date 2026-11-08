@@ -3,8 +3,6 @@
 const chatForm = document.getElementById("chat-form");
 const composer = document.getElementById("chat-compose");
 const questionInput = document.getElementById("question");
-const participant = document.getElementById("user-id");
-const reportDay = document.getElementById("report-day");
 const conversation = document.getElementById("conversation");
 
 function addMessage(kind, label, message) {
@@ -20,13 +18,6 @@ function addMessage(kind, label, message) {
   return body;
 }
 
-chatForm.querySelectorAll("[data-question]").forEach((button) => {
-  button.addEventListener("click", () => {
-    questionInput.value = button.dataset.question;
-    chatForm.requestSubmit();
-  });
-});
-
 chatForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (composer.disabled) return;
@@ -37,15 +28,13 @@ chatForm.addEventListener("submit", async (event) => {
     return;
   }
 
-  const data = {question, user_id: participant.value, day: reportDay.value};
-  const context = `${participant.selectedOptions[0].textContent} · ${data.day}`;
   const focusWasInComposer = composer.contains(document.activeElement);
   composer.disabled = true;
   document.getElementById("chat-empty").hidden = true;
-  addMessage("question", `You · ${context}`, question);
+  addMessage("question", "You", question);
   const reply = addMessage("answer", "Activity chatbot", "Looking up activity…");
   try {
-    const result = await demo.json(chatForm.action, data);
+    const result = await demo.json(chatForm.action, {question});
     reply.textContent = result.answer;
     questionInput.value = "";
   } catch (error) {

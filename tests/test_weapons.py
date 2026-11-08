@@ -8,7 +8,7 @@ import pytest
 from conftest import login, send_frame
 
 from surveillance.extensions import db
-from surveillance.models import AuditEntry, CaptureSession, RecognitionEvent
+from surveillance.models import AuditEntry, CaptureSession, RoomArrival
 from surveillance.services.ledger import audit_source
 from surveillance.services.presence import capture_state_lock
 from surveillance.services.weapons import (
@@ -67,17 +67,18 @@ def test_ssd_rejects_invalid_output_and_missing_weights(tmp_path):
         detector.load()
 
 
-def test_disabled_weapons_preserve_face_events(trained, app):
+def test_disabled_weapons_preserve_arrivals(trained, app):
     capture = camera(trained)
-    response = send_frame(trained, capture)
+    assert send_frame(trained, capture).status_code == 200
+    response = send_frame(trained, capture, sequence=1)
     assert response.status_code == 200
     assert response.json["weapons"]["status"] == "disabled"
     assert "alert_ids" not in response.json["weapons"]
     with app.app_context():
-        assert db.session.query(RecognitionEvent).count() == 1
+        assert db.session.query(RoomArrival).count() == 1
 
 
-def test_weapon_queue_failure_preserves_committed_face_events(trained, app):
+def test_weapon_queue_failure_preserves_committed_arrivals(trained, app):
     class BrokenQueue:
         def submit(self, image, data):
             raise RuntimeError("inference worker stopped")
@@ -85,11 +86,12 @@ def test_weapon_queue_failure_preserves_committed_face_events(trained, app):
     app.config["WEAPON_DETECTION_ENABLED"] = True
     app.extensions["weapon_detector"] = BrokenQueue()
     capture = camera(trained)
-    response = send_frame(trained, capture)
+    assert send_frame(trained, capture).status_code == 200
+    response = send_frame(trained, capture, sequence=1)
     assert response.status_code == 200
     assert response.json["weapons"]["status"] == "unavailable"
     with app.app_context():
-        assert db.session.query(RecognitionEvent).count() == 1
+        assert db.session.query(RoomArrival).count() == 1
 
 
 def test_slow_cold_load_does_not_block_face_request(trained, app):

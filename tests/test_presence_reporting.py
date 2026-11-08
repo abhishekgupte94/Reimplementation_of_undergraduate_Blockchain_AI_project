@@ -1,12 +1,12 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 from conftest import login, send_frame, upload
 
 from surveillance.extensions import db
-from surveillance.models import CaptureSession, PresenceInterval, RecognitionEvent
+from surveillance.models import CaptureSession, PresenceInterval, RecognitionEvent, RoomArrival
 from surveillance.services.presence import reap_capture
-from surveillance.services.reporting import day_window
+from surveillance.services.reporting import day_window, room_report
 
 
 def start(client, room=1):
@@ -15,8 +15,9 @@ def start(client, room=1):
     return response.json
 
 
-def test_confirmed_presence_short_gap_absence_and_switch(trained, app, clock):
+def test_arrivals_only_count_confirmed_room_changes(trained, app, clock):
     capture = start(trained)
+    first_arrival = clock()
     assert send_frame(trained, capture).status_code == 200
     clock.advance(0.5)
     assert send_frame(trained, capture, sequence=1).status_code == 200
@@ -26,43 +27,49 @@ def test_confirmed_presence_short_gap_absence_and_switch(trained, app, clock):
     send_frame(trained, capture, sequence=3)
     clock.advance(3.1)
     send_frame(trained, capture, marker=0, sequence=4)
-    with app.app_context():
-        interval = db.session.scalar(db.select(PresenceInterval))
-        assert interval.confirmed and interval.ended_at == interval.last_seen
-        assert (interval.last_seen - interval.first_seen).total_seconds() == 2
-    # Reacquire presence; switching closes this interval and resets confirmation.
     clock.advance(0.5)
     send_frame(trained, capture, sequence=5)
     clock.advance(0.5)
     send_frame(trained, capture, sequence=6)
     switched = trained.post("/api/camera/switch", json={**capture, "room": 2}).json
     assert send_frame(trained, capture, sequence=7).status_code == 409
+    with app.app_context():
+        assert room_report(1)["current_room"] == 1
     clock.advance(0.5)
+    second_arrival = clock()
     send_frame(trained, switched, sequence=0)
+    with app.app_context():
+        assert room_report(1)["current_room"] == 1
     clock.advance(1)
     send_frame(trained, switched, sequence=1)
-    trained.post("/api/camera/stop", json=switched)
+    with app.app_context():
+        assert room_report(1)["current_room"] == 2
+    returned = trained.post("/api/camera/switch", json={**switched, "room": 1}).json
+    clock.advance(0.5)
+    third_arrival = clock()
+    send_frame(trained, returned)
+    clock.advance(0.5)
+    send_frame(trained, returned, sequence=1)
+    trained.post("/api/camera/stop", json=returned)
+    with app.app_context():
+        arrivals = db.session.scalars(db.select(RoomArrival).order_by(RoomArrival.id)).all()
+        assert [arrival.arrived_at for arrival in arrivals] == [
+            first_arrival,
+            second_arrival,
+            third_arrival,
+        ]
+        assert db.session.query(RecognitionEvent).count() == 0
+        assert db.session.query(PresenceInterval).count() == 0
     login(trained, "admin")
     report = trained.get("/api/admin/report?user_id=1&day=2026-11-04").json
-    assert [room["seconds"] for room in report["rooms"]] == [2.5, 1]
-    assert report["total_seconds"] == 3.5
-    chat = trained.post(
-        "/api/admin/chat", json={"user_id": 1, "day": "2026-11-04", "question": "time in each room"}
-    ).json
-    assert chat["report"] == report
-    assert "Room 1: 2.5s" in chat["answer"]
-    for question, expected in (
-        ("When was the participant LAST  SEEN?", "Alice was last seen in Room 2"),
-        ("Show visits", "Alice has 3 confirmed visits"),
-        ("Compare the rooms", "Room 2: 1.0s"),
-        ("What time is it?", "I can answer questions about the selected participant and date."),
-    ):
-        response = trained.post(
-            "/api/admin/chat", json={"user_id": 1, "day": "2026-11-04", "question": question}
-        )
-        assert response.status_code == 200
-        assert expected in response.json["answer"]
-        assert response.json["report"] == report
+    assert [room["count"] for room in report["rooms"]] == [2, 1]
+    assert [room["percent"] for room in report["rooms"]] == [66.67, 33.33]
+    assert report["total_arrivals"] == 3
+    assert report["current_room"] == 1
+    assert report["last_arrival"] == report["arrivals"][-1]
+    page = trained.get("/admin/analytics?user_id=1&day=2026-11-04").text
+    assert 'data-room-one-count="2"' in page and 'data-room-two-count="1"' in page
+    assert "Confirmed arrivals" in page
 
 
 def test_unconfirmed_candidate_needs_consecutive_frames(trained, app, clock):
@@ -72,14 +79,34 @@ def test_unconfirmed_candidate_needs_consecutive_frames(trained, app, clock):
     send_frame(trained, capture, marker=0, sequence=1)
     clock.advance(0.5)
     send_frame(trained, capture, sequence=2)
+    expected_at = clock()
     with app.app_context():
-        assert not db.session.scalar(db.select(PresenceInterval)).confirmed
+        assert db.session.query(RoomArrival).count() == 0
     clock.advance(0.5)
     send_frame(trained, capture, sequence=3)
     with app.app_context():
-        interval = db.session.scalar(db.select(PresenceInterval))
-        assert interval.confirmed
-        assert (interval.last_seen - interval.first_seen).total_seconds() == 0.5
+        arrival = db.session.scalars(db.select(RoomArrival)).one()
+        assert arrival.arrived_at == expected_at
+
+
+def test_confirmation_does_not_bridge_room_generations_or_long_gaps(trained, app, clock):
+    capture = start(trained)
+    assert send_frame(trained, capture).status_code == 200
+    switched = trained.post("/api/camera/switch", json={**capture, "room": 2}).json
+    clock.advance(0.5)
+    assert send_frame(trained, switched).status_code == 200
+    with app.app_context():
+        assert room_report(1)["current_room"] is None
+    clock.advance(3.5)
+    expected_at = clock()
+    assert send_frame(trained, switched, sequence=1).status_code == 200
+    with app.app_context():
+        assert room_report(1)["current_room"] is None
+    clock.advance(0.5)
+    assert send_frame(trained, switched, sequence=2).status_code == 200
+    with app.app_context():
+        arrival = db.session.scalars(db.select(RoomArrival)).one()
+        assert arrival.room == 2 and arrival.arrived_at == expected_at
 
 
 def test_duplicate_out_of_order_and_lease_exclusion(trained, app, clock):
@@ -99,7 +126,7 @@ def test_duplicate_out_of_order_and_lease_exclusion(trained, app, clock):
     assert new_capture["capture_id"] != capture["capture_id"]
 
 
-def test_disconnect_and_restart_do_not_extrapolate(trained, app, clock):
+def test_disconnect_preserves_room_across_capture_leases(trained, app, clock):
     capture = start(trained)
     send_frame(trained, capture)
     clock.advance(1)
@@ -107,12 +134,16 @@ def test_disconnect_and_restart_do_not_extrapolate(trained, app, clock):
     clock.advance(60)
     with app.app_context():
         reap_capture()
-        interval = db.session.scalar(db.select(PresenceInterval))
-        assert (interval.ended_at - interval.first_seen).total_seconds() == 1
         assert db.session.get(CaptureSession, capture["capture_id"]).ended_at is not None
+        assert room_report(1)["current_room"] == 1
+    restarted = start(trained)
+    send_frame(trained, restarted)
+    clock.advance(0.5)
+    send_frame(trained, restarted, sequence=1)
     login(trained, "admin")
     report = trained.get("/api/admin/report?user_id=1&day=2026-11-04").json
-    assert report["total_seconds"] == 1
+    assert report["total_arrivals"] == 1
+    assert report["current_room"] == 1
 
 
 def test_logout_closes_capture(trained, app):
@@ -141,9 +172,8 @@ def test_quick_server_restart_closes_previous_lease(trained, app, clock):
     )
     assert restarted.test_client().get("/login").status_code == 200
     with restarted.app_context():
-        interval = db.session.scalar(db.select(PresenceInterval))
-        assert interval.ended_at == interval.last_seen
-        assert (interval.ended_at - interval.first_seen).total_seconds() == 0.5
+        assert room_report(1)["current_room"] == 1
+        assert room_report(1)["total_arrivals"] == 1
         assert db.session.get(CaptureSession, capture["capture_id"]).ended_at is not None
         db.session.remove()
         db.engine.dispose()
@@ -162,7 +192,7 @@ def test_unknown_face_creates_no_identified_events(trained, app):
     response = send_frame(trained, capture, marker=180)
     assert response.json["faces"][0]["name"] == "Unknown"
     with app.app_context():
-        assert db.session.query(RecognitionEvent).count() == 0
+        assert db.session.query(RoomArrival).count() == 0
 
 
 def test_identity_is_from_recognition_not_login(trained, app, clock):
@@ -178,8 +208,8 @@ def test_identity_is_from_recognition_not_login(trained, app, clock):
     clock.advance(0.5)
     send_frame(trained, capture, marker=30, sequence=1)
     with app.app_context():
-        events = list(db.session.scalars(db.select(RecognitionEvent)))
-        assert all(event.user_id == 1 for event in events)
+        arrival = db.session.scalars(db.select(RoomArrival)).one()
+        assert arrival.user_id == 1
 
 
 def test_daily_clipping_and_dublin_dst(app):
@@ -191,7 +221,7 @@ def test_daily_clipping_and_dublin_dst(app):
         assert day_window("2026-11-04")[0] == datetime(2026, 11, 4)
 
 
-def test_report_clips_cross_midnight_visit(trained, app, clock):
+def test_arrival_counts_only_on_the_day_of_first_sighting(trained, clock):
     clock.value = datetime(2026, 11, 3, 23, 59, 59)
     capture = start(trained)
     send_frame(trained, capture)
@@ -199,21 +229,18 @@ def test_report_clips_cross_midnight_visit(trained, app, clock):
     send_frame(trained, capture, sequence=1)
     trained.post("/api/camera/stop", json=capture)
     login(trained, "admin")
-    for day in ("2026-11-03", "2026-11-04"):
+    for day, count in (("2026-11-03", 1), ("2026-11-04", 0)):
         report = trained.get(f"/api/admin/report?user_id=1&day={day}").json
-        assert report["total_seconds"] == 1
+        assert report["total_arrivals"] == count
+        assert report["current_room"] == 1
 
 
-def test_admin_empty_unsupported_and_invalid_inputs(client):
+def test_analytics_empty_and_invalid_filters(client):
     login(client, "admin")
-    assert "No observed room time" in client.get("/admin/analytics").text
+    assert "No room arrivals" in client.get("/admin/analytics").text
     assert client.get("/api/admin/report?day=invalid").status_code == 400
     assert client.get("/api/admin/report?user_id=bad").status_code == 400
     assert client.get("/api/admin/report?user_id=999").status_code == 404
-    reply = client.post("/api/admin/chat", json={"question": "write a poem"}).json
-    assert "time in each room" in reply["answer"]
-    reply = client.post("/api/admin/chat", json={"question": "last seen"}).json
-    assert "No sightings" in reply["answer"]
 
 
 @pytest.mark.parametrize("room", [None, 0, 3, True, "bad"])
@@ -252,5 +279,42 @@ def test_repeated_face_is_reused_only_in_current_room(trained, app, clock, monke
     assert send_frame(trained, switched).json["faces"] == first.json["faces"]
     assert len(calls) == 4
     with app.app_context():
-        rooms = db.session.scalars(db.select(RecognitionEvent.room).order_by(RecognitionEvent.id))
-        assert list(rooms) == [1, 1, 1, 2]
+        rooms = db.session.scalars(db.select(RoomArrival.room).order_by(RoomArrival.id))
+        assert list(rooms) == [1]
+
+
+def test_legacy_confirmed_visits_seed_arrivals_and_room(trained, app, clock):
+    capture = start(trained)
+    with app.app_context():
+        from surveillance.services.ledger import audit_source, verify_audit
+
+        for offset, room, confirmed in ((-86400, 1, True), (-60, 1, True), (-10, 2, False)):
+            seen_at = clock() + timedelta(seconds=offset)
+            interval = PresenceInterval(
+                capture_id=capture["capture_id"],
+                user_id=1,
+                room=room,
+                first_seen=seen_at,
+                last_seen=seen_at,
+                ended_at=seen_at,
+                confirmed=confirmed,
+            )
+            db.session.add(interval)
+            audit_source(interval)
+        db.session.commit()
+        assert room_report(1, "2026-11-04")["total_arrivals"] == 0
+        assert room_report(1)["current_room"] == 1
+        assert room_report(1)["total_arrivals"] == 1
+    assert send_frame(trained, capture).status_code == 200
+    clock.advance(0.5)
+    assert send_frame(trained, capture, sequence=1).status_code == 200
+    switched = trained.post("/api/camera/switch", json={**capture, "room": 2}).json
+    clock.advance(0.5)
+    assert send_frame(trained, switched).status_code == 200
+    clock.advance(0.5)
+    assert send_frame(trained, switched, sequence=1).status_code == 200
+    with app.app_context():
+        assert room_report(1)["current_room"] == 2
+        assert [entry["room"] for entry in room_report(1)["arrivals"]] == [1, 2]
+        assert db.session.query(PresenceInterval).count() == 3
+        assert verify_audit()["ok"]

@@ -5,7 +5,7 @@
 <div class="page-heading">
   <p class="eyebrow">Administrator workspace</p>
   <h1>Room analytics</h1>
-  <p>Compare observed room time and review confirmed visits for a participant.</p>
+  <p>Compare arrival counts and review when a participant entered each room.</p>
 </div>
 <section class="panel report-filters" aria-labelledby="report-filters-heading">
   <div class="section-heading">
@@ -17,39 +17,42 @@
     <button type="submit">Show activity</button>
   </form>
 </section>
-{% if report and report.total_seconds > 0 %}
-<div class="metric-grid" aria-label="Room time summary">
-  <div class="metric metric-total"><span>Total observed</span><strong>{{ '%.1f'|format(report.total_seconds) }} <small>sec</small></strong></div>
+{% if report and report.current_room %}
+<p>Last known room for {{ selected_user.display_name }} is Room {{ report.current_room }}.</p>
+{% endif %}
+{% if report and report.total_arrivals > 0 %}
+<div class="metric-grid" aria-label="Room arrival summary">
+  <div class="metric metric-total"><span>Total arrivals</span><strong>{{ report.total_arrivals }}</strong></div>
   {% for room in report.rooms %}
-  <div class="metric metric-room-{{ room.room }}"><span>Room {{ room.room }}</span><strong>{{ '%.1f'|format(room.seconds) }} <small>sec</small></strong></div>
+  <div class="metric metric-room-{{ room.room }}"><span>Room {{ room.room }}</span><strong>{{ room.count }}</strong></div>
   {% endfor %}
 </div>
 <section class="panel chart-layout" aria-labelledby="room-breakdown-heading">
   <div class="chart-stage">
-    <canvas id="room-chart" width="300" height="300" role="img" aria-label="Room time chart. Exact values appear in the room breakdown table." data-room-one="{{ report.rooms[0].seconds }}" data-room-two="{{ report.rooms[1].seconds }}"></canvas>
+    <canvas id="room-chart" width="300" height="300" role="img" aria-label="Room arrivals chart. Exact values appear in the room breakdown table." data-room-one-count="{{ report.rooms[0].count }}" data-room-two-count="{{ report.rooms[1].count }}"></canvas>
   </div>
   <div>
     <p class="eyebrow">Room breakdown</p>
     <h2 id="room-breakdown-heading">{{ selected_user.display_name }}</h2>
-    <p class="muted">Percentages compare observed time in both rooms on {{ day }}.</p>
+    <p class="muted">Percentages show each room’s share of arrivals on {{ day }}.</p>
     <table>
-      <thead><tr><th scope="col">Room</th><th scope="col">Seconds</th><th scope="col">Share</th></tr></thead>
+      <thead><tr><th scope="col">Room</th><th scope="col">Arrivals</th><th scope="col">Share</th></tr></thead>
       <tbody>
       {% for room in report.rooms %}
-        <tr><th scope="row"><span class="room-marker room-marker-{{ room.room }}" aria-hidden="true"></span>Room {{ room.room }}</th><td>{{ '%.1f'|format(room.seconds) }}</td><td>{{ '%.1f'|format(room.percent) }}%</td></tr>
+        <tr><th scope="row"><span class="room-marker room-marker-{{ room.room }}" aria-hidden="true"></span>Room {{ room.room }}</th><td>{{ room.count }}</td><td>{{ '%.1f'|format(room.percent) }}%</td></tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
 </section>
 <section class="panel">
-  <h2>Confirmed visits</h2>
-  <div class="table-scroll" tabindex="0" role="region" aria-label="Confirmed visits table">
+  <h2>Confirmed arrivals</h2>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Confirmed arrivals table">
     <table>
-      <thead><tr><th scope="col">Room</th><th scope="col">First seen</th><th scope="col">Last seen</th><th scope="col">Seconds</th><th scope="col">Status</th></tr></thead>
+      <thead><tr><th scope="col">Room</th><th scope="col">Arrived at</th></tr></thead>
       <tbody>
-      {% for visit in report.visits %}
-        <tr><td>{{ visit.room }}</td><td>{{ visit.first_seen|localtime }}</td><td>{{ visit.last_seen|localtime }}</td><td>{{ '%.1f'|format(visit.seconds) }}</td><td>{{ 'Active' if visit.ongoing else 'Closed' }}</td></tr>
+      {% for arrival in report.arrivals %}
+        <tr><td>Room {{ arrival.room }}</td><td>{{ arrival.at|localtime }}</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -57,9 +60,9 @@
 </section>
 {% else %}
 <section class="panel empty-panel">
-  <h2>No observed room time</h2>
-  <p>{{ 'No confirmed visits for this participant on this date.' if selected_user else 'No participants have registered yet.' }}</p>
+  <h2>No room arrivals</h2>
+  <p>{{ 'No confirmed arrivals for this participant on this date.' if selected_user else 'No participants have registered yet.' }}</p>
 </section>
 {% endif %}
-<p class="muted">Refresh this page to include new sightings.</p>
+<p class="muted">Refresh this page to include new arrivals.</p>
 {% endblock %}

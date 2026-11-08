@@ -51,6 +51,9 @@ def create_app(test_config=None):
         WEAPON_COOLDOWN_SECONDS=10,
         WEAPON_MODEL_DIR=os.getenv("WEAPON_MODEL_DIR"),
         WEAPON_RESULT_MAX_AGE_SECONDS=3,
+        EMOTION_MODEL_DIR=os.getenv("EMOTION_MODEL_DIR"),
+        EMOTION_CONFIDENCE=os.getenv("EMOTION_CONFIDENCE", "0.60"),
+        EMOTION_RESULT_MAX_AGE_SECONDS=3,
     )
     if profile == "demo" and not app.config["SQLALCHEMY_DATABASE_URI"]:
         app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///surveillance.sqlite"
@@ -59,6 +62,10 @@ def create_app(test_config=None):
     app.config.setdefault(
         "WEAPON_DETECTION_ENABLED",
         not app.testing and os.getenv("WEAPON_DETECTION_ENABLED", "true").lower() == "true",
+    )
+    app.config.setdefault(
+        "EMOTION_RECOGNITION_ENABLED",
+        not app.testing and os.getenv("EMOTION_RECOGNITION_ENABLED", "true").lower() == "true",
     )
     if not app.config["SQLALCHEMY_DATABASE_URI"]:
         raise RuntimeError("Select APP_PROFILE=demo, or configure DATABASE_URL for MySQL.")
@@ -81,6 +88,7 @@ def create_app(test_config=None):
 
     from . import models, weapon_models  # noqa: F401
     from .cli import register_cli
+    from .emotion_cli import register_emotion_cli
     from .routes import admin, auth, camera, enrollment
     from .routes.weapons import bp as weapons_bp
     from .weapon_cli import register_weapon_cli
@@ -89,6 +97,7 @@ def create_app(test_config=None):
         app.register_blueprint(blueprint)
     app.register_blueprint(weapons_bp)
     register_cli(app)
+    register_emotion_cli(app)
     register_weapon_cli(app)
     from .ledger_cli import register_ledger_cli
 

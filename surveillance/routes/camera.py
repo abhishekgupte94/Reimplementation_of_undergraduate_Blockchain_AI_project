@@ -5,6 +5,7 @@ from ..extensions import db
 from ..models import ModelVersion, RuntimeState
 from ..security import json_object, role_required
 from ..services import presence
+from ..services.emotions import submit_frame as submit_emotions
 from ..services.recognition import clear_recent_face, recognize
 from ..services.vision import VisionError, decode_image, image_digest
 from ..services.weapons import submit_frame
@@ -48,7 +49,7 @@ def switch():
     room = room_number(data.get("room"))
     with presence.locked_state() as state:
         capture = presence.require_capture(state, user_id, data)
-        presence.close_intervals(capture)
+        capture.arrival_candidates = None
         capture.room = room
         capture.generation += 1
         capture.last_sequence = -1
@@ -98,8 +99,7 @@ def frame():
         except VisionError as error:
             abort(503, str(error))
         capture.last_sequence = sequence
-        capture.last_frame_at = timestamp
-        presence.record_observations(capture, version.id, observations, timestamp)
+        confirmed = presence.record_observations(capture, version.id, observations, timestamp)
         payload = {
             "faces": faces,
             "room": capture.room,
@@ -117,9 +117,17 @@ def frame():
             "room": capture.room,
             "observed_at": timestamp,
         }
-    # Face presence is committed before optional SSD work is queued. Its model
-    # loads/inference run on a separate thread, outside the webcam state lock.
+        emotion_metadata = {**weapon_metadata, "model_id": version.id}
+    # Optional inference runs outside the camera lock, after arrivals commit.
     payload["weapons"] = submit_frame(image, weapon_metadata)
+    emotion = submit_emotions(
+        image, [face for face in faces if face["user_id"] in confirmed], emotion_metadata
+    )
+    estimates = emotion["estimates"]
+    for face in faces:
+        if estimate := estimates.get(face["user_id"]):
+            face["emotion"] = estimate["emotion"]
+    payload["emotion"] = {key: value for key, value in emotion.items() if key != "estimates"}
     return jsonify(payload)
 
 

@@ -1,23 +1,18 @@
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import pytest
-from conftest import FakePipeline, login, upload
+from conftest import FakePipeline, login, send_frame, upload
 from flask_migrate import downgrade, upgrade
 from sqlalchemy import inspect
 from sqlalchemy.engine import make_url
 
 from surveillance import create_app
 from surveillance.extensions import db
-from surveillance.models import LedgerState, User
-from surveillance.services.presence import (
-    finish_capture,
-    locked_state,
-    now,
-    record_observations,
-    start_capture,
-)
+from surveillance.models import LedgerState, RuntimeState, User
+from surveillance.services.emotion_observations import latest_emotion, persist_emotions
+from surveillance.services.ledger import verify_audit
 from surveillance.services.reporting import room_report
 from surveillance.services.training import process_next_job
 from surveillance.services.weapons import persist_alerts
@@ -37,6 +32,8 @@ def test_sqlite_migration_upgrade_and_downgrade(tmp_path):
     with application.app_context():
         upgrade(directory=MIGRATIONS)
         assert "recognition_event" in inspect(db.engine).get_table_names()
+        assert "room_arrival" in inspect(db.engine).get_table_names()
+        assert "emotion_observation" in inspect(db.engine).get_table_names()
         assert "runtime_state" in inspect(db.engine).get_table_names()
         downgrade(directory=MIGRATIONS, revision="base")
         assert inspect(db.engine).get_table_names() == ["alembic_version"]
@@ -45,7 +42,7 @@ def test_sqlite_migration_upgrade_and_downgrade(tmp_path):
 
 
 @pytest.mark.mysql
-def test_mysql_migration_training_and_subsecond_reporting(tmp_path):
+def test_mysql_migration_training_arrivals_and_expressions(tmp_path, clock):
     uri = os.environ.get("TEST_MYSQL_URL")
     if not uri:
         pytest.skip("Set TEST_MYSQL_URL to a dedicated empty database ending in _test.")
@@ -60,6 +57,7 @@ def test_mysql_migration_training_and_subsecond_reporting(tmp_path):
             "SQLALCHEMY_DATABASE_URI": uri,
             "PRIVATE_DIR": tmp_path / "private",
             "WTF_CSRF_ENABLED": False,
+            "CLOCK": clock,
         }
     )
     application.extensions["face_pipeline"] = FakePipeline()
@@ -77,13 +75,15 @@ def test_mysql_migration_training_and_subsecond_reporting(tmp_path):
             assert upload(client).status_code == 202
             assert process_next_job()
             assert client.get("/api/enrollment/status").json["ready"]
-            payload = start_capture(user_id, 1)
+            timestamp = datetime(2026, 11, 4, 12, 0, 0, 123456)
+            clock.value = timestamp
+            payload = client.post("/api/camera/start", json={"room": 1}).json
             sample = {
                 "capture_id": payload["capture_id"],
                 "generation": payload["generation"],
                 "frame_sequence": 0,
                 "room": 1,
-                "observed_at": now(),
+                "observed_at": timestamp,
             }
             detections = [{"label": "Pen", "confidence": 0.91, "box": [10, 20, 30, 40]}]
             with db.engine.connect() as writer:
@@ -92,21 +92,30 @@ def test_mysql_migration_training_and_subsecond_reporting(tmp_path):
                 )
                 assert persist_alerts(sample, detections) == []
             assert len(persist_alerts(sample, detections)) == 1
-            from surveillance.models import CaptureSession, RuntimeState
-
-            timestamp = datetime(2026, 11, 4, 12, 0, 0, 123456)
-            with locked_state() as state:
-                capture = db.session.get(CaptureSession, payload["capture_id"])
-                model_id = db.session.get(RuntimeState, 1).active_model_id
-                record_observations(capture, model_id, {user_id: 0.1}, timestamp)
-                db.session.flush()
-                record_observations(
-                    capture, model_id, {user_id: 0.2}, timestamp + timedelta(seconds=0.5)
-                )
-                finish_capture(state, capture, timestamp + timedelta(seconds=0.5))
-            assert room_report(user_id, "2026-11-04")["total_seconds"] == 0.5
-            from surveillance.services.ledger import verify_audit
-
+            assert send_frame(client, payload).status_code == 200
+            clock.advance(0.5)
+            assert send_frame(client, payload, sequence=1).status_code == 200
+            expression_at = clock()
+            model_id = db.session.get(RuntimeState, 1).active_model_id
+            db.session.rollback()
+            assert persist_emotions(
+                {**sample, "frame_sequence": 1, "observed_at": expression_at, "model_id": model_id},
+                {
+                    user_id: {
+                        "emotion": "happy",
+                        "confidence": 0.94,
+                        "model_version": "test-expressions",
+                    }
+                },
+            )
+            expression = latest_emotion(user_id, day="2026-11-04", room=1)
+            assert expression.emotion == "happy"
+            assert expression.observed_at == expression_at
+            assert expression.confidence == pytest.approx(0.94)
+            assert client.post("/api/camera/stop", json=payload).status_code == 200
+            report = room_report(user_id, "2026-11-04")
+            assert report["total_arrivals"] == 1
+            assert report["last_arrival"] == {"room": 1, "at": timestamp}
             assert verify_audit()["ok"]
         finally:
             db.session.rollback()

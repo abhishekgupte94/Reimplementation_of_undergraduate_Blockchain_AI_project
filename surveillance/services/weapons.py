@@ -1,7 +1,6 @@
 """Genuine SSD inference, isolated from the face-recognition request path."""
 
 import hashlib
-import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -14,10 +13,10 @@ from flask import current_app
 from sqlalchemy.exc import OperationalError
 
 from ..extensions import db
-from ..models import CaptureSession, LedgerState, RuntimeState
+from ..models import CaptureSession, RuntimeState
 from ..weapon_models import WeaponAlert
 from . import presence
-from .ledger import audit_source
+from .ledger import audit_source, audit_write_is_busy, reserve_audit_write
 
 MODEL_TAG = "ssd-mobilenet-v2-openimages-v4-pen-2018-12-12"
 TARGET_LABEL = "Pen"
@@ -112,22 +111,6 @@ class SSDWeaponDetector:
         return detections
 
 
-def reserve_alert_write():
-    """Fail fast on competing writers before holding up the camera state lock."""
-    connection = db.session.connection()
-    if connection.dialect.name == "sqlite":
-        timeout = connection.exec_driver_sql("PRAGMA busy_timeout").scalar_one()
-        connection.exec_driver_sql("PRAGMA busy_timeout=0")
-        try:
-            connection.exec_driver_sql("BEGIN IMMEDIATE")
-        finally:
-            connection.exec_driver_sql(f"PRAGMA busy_timeout={int(timeout)}")
-    elif connection.dialect.name == "mysql":
-        db.session.execute(
-            db.select(LedgerState.id).where(LedgerState.id == 1).with_for_update(nowait=True)
-        ).scalar()
-
-
 def persist_alerts(metadata, detections):
     """Record only results still belonging to the active room/capture generation."""
     strongest = max(
@@ -145,7 +128,7 @@ def persist_alerts(metadata, detections):
             maximum_age = current_app.config["WEAPON_RESULT_MAX_AGE_SECONDS"]
             if not 0 <= (timestamp - metadata["observed_at"]).total_seconds() <= maximum_age:
                 return []
-            reserve_alert_write()
+            reserve_audit_write()
             capture_timeout = timedelta(seconds=current_app.config["CAPTURE_TIMEOUT_SECONDS"])
             active_capture = db.session.scalar(
                 db.select(CaptureSession.id)
@@ -181,10 +164,8 @@ def persist_alerts(metadata, detections):
     except Timeout:
         return []
     except OperationalError as error:
-        sqlite_code = getattr(error.orig, "sqlite_errorcode", 0) & 0xFF
-        mysql_code = error.orig.args[0] if error.orig.args else None
-        if sqlite_code in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED) or mysql_code == 3572:
-            return []  # MySQL ER_LOCK_NOWAIT (3572) also means a writer beat us to the lock.
+        if audit_write_is_busy(error):
+            return []
         raise
 
 

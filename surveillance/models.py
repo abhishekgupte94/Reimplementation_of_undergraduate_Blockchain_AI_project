@@ -69,6 +69,7 @@ class CaptureSession(db.Model):
     started_at = db.Column(UTC_DATETIME, nullable=False, default=utcnow)
     last_frame_at = db.Column(UTC_DATETIME, nullable=False, default=utcnow)
     ended_at = db.Column(UTC_DATETIME)
+    arrival_candidates = db.Column(db.JSON)
 
 
 class RuntimeState(db.Model):
@@ -80,6 +81,8 @@ class RuntimeState(db.Model):
 
 
 class RecognitionEvent(db.Model):
+    """Legacy per-frame recognition history, retained for audit verification."""
+
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
     capture_id = db.Column(db.String(36), db.ForeignKey("capture_session.id"), nullable=False)
@@ -91,6 +94,8 @@ class RecognitionEvent(db.Model):
 
 
 class PresenceInterval(db.Model):
+    """Legacy confirmed visits supply room history from before arrival recording."""
+
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
     capture_id = db.Column(db.String(36), db.ForeignKey("capture_session.id"), nullable=False)
@@ -100,6 +105,48 @@ class PresenceInterval(db.Model):
     ended_at = db.Column(UTC_DATETIME)
     confirmed = db.Column(db.Boolean, nullable=False, default=False)
     consecutive = db.Column(db.Integer, nullable=False, default=1)
+
+
+class RoomArrival(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    capture_id = db.Column(db.String(36), db.ForeignKey("capture_session.id"), nullable=False)
+    model_id = db.Column(db.Integer, db.ForeignKey("model_version.id"), nullable=False)
+    room = db.Column(db.Integer, nullable=False)
+    arrived_at = db.Column(UTC_DATETIME, nullable=False)
+    score = db.Column(db.Float, nullable=False)  # L2 distance in the arrival frame
+
+    __table_args__ = (
+        db.Index("ix_room_arrival_user_id_id", "user_id", "id"),
+        db.Index("ix_room_arrival_user_id_arrived_at", "user_id", "arrived_at"),
+    )
+
+
+class EmotionObservation(db.Model):
+    """A timestamped facial-expression estimate for a recognised participant."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    capture_id = db.Column(db.String(36), db.ForeignKey("capture_session.id"), nullable=False)
+    model_id = db.Column(db.Integer, db.ForeignKey("model_version.id"), nullable=False)
+    generation = db.Column(db.Integer, nullable=False)
+    frame_sequence = db.Column(db.Integer, nullable=False)
+    room = db.Column(db.Integer, nullable=False)
+    observed_at = db.Column(UTC_DATETIME, nullable=False)
+    emotion = db.Column(db.String(16), nullable=False)
+    confidence = db.Column(db.Float, nullable=False)
+    model_version = db.Column(db.String(96), nullable=False)
+
+    __table_args__ = (
+        db.Index("ix_emotion_observation_user_id_observed_at", "user_id", "observed_at"),
+        db.UniqueConstraint(
+            "capture_id",
+            "generation",
+            "user_id",
+            "frame_sequence",
+            name="uq_emotion_observation_sample",
+        ),
+    )
 
 
 class LedgerState(db.Model):
@@ -138,5 +185,7 @@ class LedgerAnchor(db.Model):
 
 @event.listens_for(AuditEntry, "before_update")
 @event.listens_for(AuditEntry, "before_delete")
-def immutable_audit_entry(mapper, connection, target):
-    raise ValueError("Audit entries are append-only; updates and deletes are prohibited.")
+@event.listens_for(EmotionObservation, "before_update")
+@event.listens_for(EmotionObservation, "before_delete")
+def immutable_audited_record(mapper, connection, target):
+    raise ValueError("Audit entries and emotion observations are append-only.")

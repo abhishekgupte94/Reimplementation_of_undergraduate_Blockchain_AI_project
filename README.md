@@ -1,8 +1,8 @@
 # Block A.I
 
-A local rebuild of a 2019 surveillance demonstration. Participants enroll photos and use one webcam to simulate visits to two rooms. Administrators can compare observed room time, ask the activity chatbot about visits and sightings, and review alerts from an SSD pen detection simulation.
+A local rebuild of a 2019 surveillance demonstration. Participants enroll photos and use one webcam to simulate arrivals in two rooms. Administrators can compare arrival counts, ask the activity chatbot about arrivals and estimated facial expressions, and review alerts from an SSD pen detection simulation.
 
-Flask serves the app, MySQL stores operational records, and a local Anvil development chain anchors audit hashes. Face and pen inference run locally through OpenCV. The demo can run offline after setup.
+Flask serves the app, MySQL stores operational records, and a local Anvil development chain anchors audit hashes. Face, expression and pen inference run locally through OpenCV. The demo can run offline after setup.
 
 ## Set up a fresh checkout
 
@@ -17,6 +17,7 @@ npm ci --ignore-scripts
 python scripts/setup_mysql.py
 flask --app surveillance download-model
 flask --app surveillance download-weapons --with-sample
+flask --app surveillance download-emotions
 flask --app surveillance create-admin
 ```
 
@@ -25,6 +26,8 @@ flask --app surveillance create-admin
 The model download commands verify checksums and store weights under `instance/private/models/`. See [SSD pen simulation](docs/weapon-detection.md) for model provenance and sample attribution.
 
 ## Run the demo
+
+For an existing checkout, stop the demo and run `flask --app surveillance db upgrade` with the configured MySQL server running. Run `flask --app surveillance download-emotions` before restarting to enable expression labels.
 
 ```sh
 source .venv/bin/activate
@@ -58,27 +61,36 @@ Open `https://<certificate hostname or IP>:5001` and grant webcam access when pr
 1. Register a participant, then log in. Upload at least three different JPEG/PNG photos, each containing exactly one clear face. Maximum: 5 MB per photo, 20 photos and 25 MB per request. Exact duplicate files do not count.
 2. Watch training status. A queued job needs the trainer terminal running. OpenFace produces the embeddings; only the identity matcher/classifier is fitted to your photos. The pretrained neural network is not retrained.
 3. Open **Room cameras** and select **Start webcam**. Allow camera access in the browser and, if requested, in device settings. Use localhost on the Flask host or trusted HTTPS on another device.
-4. Stay visible in **Room 1** for approximately 20 seconds. Click **Room 2** and stay visible for approximately 10 seconds. Leave the camera view for more than three seconds, then stop capture.
-5. In another browser profile/private window, open [administrator login](http://127.0.0.1:5001/admin/login). Select the participant and date under **Room analytics**. The chart should show roughly twice as much observed time in Room 1; exact values vary with successful detections and sampling.
-6. Open **Chatbot**, select the same participant and date, and choose a suggested question or type your own. The participant and date fields define the scope of each answer.
+4. Wait for the camera to recognise you in **Room 1**, then select **Room 2** and let it recognise you again. Return to **Room 1** for one more recognition. Step out of view and stop capture.
+5. Sign in as administrator in another browser profile or private window. Under **Room analytics**, select the participant and date. For a participant with no previous arrivals, this sequence records two arrivals in Room 1 and one in Room 2. Room 1 stays your last known room after you step out of view. [Administrator login](http://127.0.0.1:5001/admin/login)
+6. Open **Chatbot** and type a question such as “Is Alice in Room 1?” or “How many times did Alice appear in each room today?” Replace Alice with your participant's name. Arrival questions search all recorded dates by default. Include “today”, “yesterday” or a date such as `2026-11-04` to narrow the answer.
 7. Show a pen to the participant's webcam while an administrator page is visible in the other profile. A detected pen opens an SSD simulation alert on the administrator page. Select **Acknowledge** or open **SSD alerts** to review the history.
+8. Watch for an expression label beside the recognised name in either room. Ask the chatbot “What was Alice's latest expression in Room 2?” for the most recent recorded estimate in that room.
 
 Use separate browser profiles for simultaneous participant and administrator logins because tabs in one profile share the same login cookie. Only one capture session can own the demonstration webcam at a time, across accounts and pages.
 
-## Recognition and timing
+## Recognition and room arrivals
 
 - Haar locates faces. A shared preprocessing path converts each crop to the OpenFace 96×96 input and normalizes its 128-dimensional embedding. Enrollment accepts one face per photo; live frames can recognise multiple enrolled people.
 - One enrolled identity uses nearest-sample embedding distance. With two or more eligible identities, a linear `SVC(C=1)` chooses the identity and must agree with the nearest enrolled sample. A distance gate rejects unfamiliar faces in both modes. Identity always comes from recognition, not the login account.
 - `MATCH_DISTANCE=0.8` is the configurable starting L2-distance threshold for normalized embeddings. It is a demonstration setting, not a measured accuracy guarantee. Lower it to reduce false matches or add more varied enrollment photos. With only three photos, lighting and pose have a substantial effect. SVC probabilities are deliberately not presented as calibrated confidence scores.
-- Browser capture samples about twice per second and sends one request at a time. The server checks the session owner, random token, room generation, and increasing frame sequence. Late frames from the previous room cannot add time to the new room.
-- A repeated, byte-identical frame can reuse a single recognised face result in the same capture and room generation when the model and matching threshold agree. Cache hits still record fresh observations for recognised identities. The preview draws a box and name for detected faces.
-- Two consecutive matching observations confirm a visit. Confirmed visits bridge gaps of at most three seconds. Longer gaps end a visit at its last recognised frame; unconfirmed candidates add no room time. Charts do not extrapolate an active visit into the future.
-- Switching rooms ends the old interval at its last sighting and requires fresh recognition. Hidden pages, navigation, logout, camera shutdown and disconnects stop capture. A missing heartbeat expires the capture lease after five seconds. On the next frame, capture action or report request, stale records are closed using their last confirmed sighting. A server restart cannot add offline time.
-- Store all timestamps as UTC, including microseconds in MySQL. Display and date filters use `Europe/Dublin`, including daylight-saving transitions. Visits spanning midnight are clipped to the selected local day. Pie percentages use Room 1 plus Room 2 observed time as the denominator.
+- Browser capture samples about twice per second and sends one request at a time. The server checks the session owner, random token, room generation, and increasing frame sequence. A room switch requires fresh recognition in the new room.
+- A repeated, byte-identical frame can reuse a single recognised face result in the same capture and room generation when the model and matching threshold agree. The preview draws a box and name for detected faces.
+- Two consecutive matches confirm an arrival, recorded at the timestamp of the first match. The first confirmed room and each confirmed change of room add one arrival. A person keeps their last known room through camera misses, same-room reappearances, capture stops and restarts.
+- Hidden pages, navigation, logout, camera shutdown and disconnects stop capture. A missing heartbeat expires the capture lease after five seconds.
+- Arrival timestamps are stored in UTC with microsecond precision. Display and date filters use `Europe/Dublin`, including daylight-saving transitions. Each arrival counts on its local calendar date. The pie chart shows each room's share of the total arrival count.
+
+## Facial expression estimates
+
+OpenCV Zoo's Progressive Teacher model uses MobileFaceNet to classify expressions. YuNet aligns the face inside an existing Haar crop. Both models together use about 5 MB of weight files and run through the existing OpenCV installation. [Expression model and Apache 2.0 license](https://github.com/opencv/opencv_zoo/tree/main/models/facial_expression_recognition) · [YuNet and MIT license](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet)
+
+The camera overlay shows **neutral**, **happy**, **sad**, **angry** or **surprised** when the model returns a supported result above its score threshold. The label describes the expression estimated from that webcam sample. A bounded background worker samples recognised faces and discards stale room results. Set `EMOTION_RECOGNITION_ENABLED=false` in `.env` to disable expression sampling.
+
+MySQL stores the first accepted estimate and subsequent label changes for a recognised participant in each capture room generation. Each record includes the sample timestamp, room and model version. The chatbot reports the recorded estimate with its room and time. Expression samples are separate from arrival counts.
 
 ## MySQL, audit ledger and SSD alerts
 
-MySQL is the operational query store for all existing charts and chatbot responses. Recognition, presence and weapon changes also write canonical, hash-linked audit snapshots and a durable outbox in the same SQL transaction. A separate worker anchors only hash commitments to the local development chain. Chain outages do not block camera requests.
+MySQL supplies the data for charts and chatbot responses. Room arrivals, expression observations and weapon alert changes write canonical, hash-linked audit snapshots and a durable outbox in the same SQL transaction. A separate worker anchors the hash commitments to the local development chain. Chain outages do not block camera requests.
 
 ```sh
 flask --app surveillance ledger-status
@@ -99,9 +111,9 @@ The smoke command checks a labeled example without writing presence or alert rec
 
 ## Architecture and interfaces
 
-`surveillance/` contains the application factory, role-controlled route blueprints, database models and independent services for vision, recognition, training, presence and reporting. `migrations/` contains the initial reversible Alembic schema. `tests/` exercises the application with isolated databases and private directories. The ledger and weapon migrations follow the initial schema in one linear revision chain.
+`surveillance/` contains the application factory, role-controlled route blueprints, database models and independent services for vision, recognition, training, presence and reporting. `migrations/` contains the reversible Alembic revisions. `tests/` exercises the application with isolated databases and private directories.
 
-The checkout contains the source, migrations, tests, lockfiles and placeholder configuration. Keep `.env`, `instance/`, enrollment photos, trained artifacts, database exports, ledger state and TLS keys local. Webcam frames are discarded after inference. Accepted recognitions store identity, room, UTC timestamp, matching distance and model version. Confirmed intervals support duration reporting, and enrollment photographs are served only to their owner through an authenticated route.
+The checkout contains the source, migrations, tests, lockfiles and placeholder configuration. Keep `.env`, `instance/`, enrollment photos, trained artifacts, database exports, ledger state and TLS keys local. Webcam frames are discarded after inference. Confirmed arrivals store identity, room, UTC timestamp, matching distance and model version. Historical reports derive arrivals from changes of room in the old confirmed intervals. Enrollment photographs are served only to their owner through an authenticated route.
 
 Primary endpoints:
 
@@ -113,13 +125,13 @@ Primary endpoints:
 | `GET /api/enrollment/status`, `POST /api/enrollment/retrain` | Own enrollment/training status and retry |
 | `POST /api/camera/start` | JSON room `1` or `2`; returns `capture_id`, `token`, `room`, `generation` |
 | `POST /api/camera/switch` | Capture credentials plus new room; returns updated generation |
-| `POST /api/camera/frame` | Multipart capture credentials, generation, increasing sequence and image `frame` |
+| `POST /api/camera/frame` | Multipart capture credentials, generation, increasing sequence and image `frame`; recognised faces include a fresh expression estimate when available |
 | `POST /api/camera/stop` | Capture credentials, JSON or form beacon |
 | `/admin/analytics`, `/admin/chatbot`, `/admin/alerts` | Separate administrator pages |
 | `GET /api/admin/weapon-alerts` | Admin-only SSD history and latest pending simulation alert. `?pending=1` returns only the pending alert |
 | `POST /api/admin/weapon-alerts/<id>/acknowledge` | Record administrator acknowledgement |
-| `GET /api/admin/report` | `user_id` and ISO `day`; duration totals, visits and last sighting |
-| `POST /api/admin/chat` | JSON `user_id`, `day`, `question`; answer and the same report data |
+| `GET /api/admin/report` | `user_id` and ISO `day`; room counts, arrival timestamps and last known room |
+| `POST /api/admin/chat` | JSON `question`; answer and the shared report for arrival queries |
 
 All state-changing web endpoints require a valid CSRF token. JSON/multipart requests use `X-CSRFToken`, available in the page's `csrf-token` meta element; form beacons use `csrf_token`. No API accepts an identity supplied by the browser as a recognition result.
 
@@ -133,12 +145,13 @@ ruff check surveillance tests scripts migrations
 flask --app surveillance db check
 flask --app surveillance model-smoke
 flask --app surveillance weapon-smoke
+flask --app surveillance emotion-smoke
 flask --app surveillance ledger-verify --chain
 ```
 
-Most recognition-flow tests use an explicitly isolated deterministic test double so they can verify timing and failure behavior. The real-model test checks actual OpenFace inference when weights are present. A separate Haar test verifies blank-image rejection. These checks do not replace the webcam demonstration above or establish recognition accuracy on your photographs.
+Most recognition-flow tests use an isolated deterministic test double to verify arrivals, room changes and failure handling. The real-model test checks OpenFace inference when weights are present. A separate Haar test verifies blank-image rejection.
 
-The MySQL integration test is skipped unless `TEST_MYSQL_URL` points to a **dedicated, empty** `mysql+pymysql` database whose name ends in `_test`. It upgrades the schema, tests enrollment/training and subsecond reporting, then removes its test schema. Never use your demonstration database for this variable.
+The MySQL integration test is skipped unless `TEST_MYSQL_URL` points to a **dedicated, empty** `mysql+pymysql` database whose name ends in `_test`. It upgrades the schema, tests enrollment, training and arrival reporting, then removes its test schema. Never use your demonstration database for this variable.
 
 ```sh
 TEST_MYSQL_URL='mysql+pymysql://test_user:password@127.0.0.1:3307/surveillance_test' python -m pytest -m mysql -q
@@ -158,4 +171,4 @@ If recognition is unavailable, check the enrollment job message, trainer output,
 
 The [2018 tutorial](https://pyimagesearch.com/2018/09/24/opencv-face-recognition/) uses OpenFace embeddings and SVC. This rebuild uses its embedding approach with the requested Haar detector; OpenFace is an implementation inspired by FaceNet, rather than a newly trained original FaceNet network. [CMU's model documentation](https://cmusatyalab.github.io/openface/models-and-accuracies/) provides the pretrained weights. The downloader verifies the checksum published by CMU's `models/get-models.sh` over HTTPS. OpenFace weights are attributed to Carnegie Mellon University under Apache 2.0.
 
-The demo follows the original flow from camera capture to face identification, timestamped records, and administrator queries. One browser webcam supplies both simulated rooms. The activity chatbot uses a local ChatterBot rules adapter for room time, confirmed visits, and last sightings. Answers use the same SQL reports as the Canvas 2D charts. The adapter uses fixed rules and stores no conversation history.
+The demo follows the original flow from camera capture to face identification, timestamped records and administrator queries. One browser webcam supplies both simulated rooms. The local ChatterBot rules adapter answers questions about arrivals, last known rooms and recorded expression estimates. It uses the same SQL reports as the Canvas 2D charts for arrival questions and stores no conversation history.
