@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{% block title %}SSD simulation alerts · Blocka.i{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <p class="eyebrow">Administrator workspace</p>
+  <h1>SSD simulation alerts</h1>
+  <p>Review pen detections by camera room and observation time.</p>
+</div>
+<section class="panel" aria-labelledby="ssd-history-title">
+  <div class="section-heading">
+    <h2 id="ssd-history-title">Alert history</h2>
+    <span class="badge live-badge">Refreshes automatically</span>
+  </div>
+  <p id="ssd-history-status" class="muted" role="status">Loading alert history…</p>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="SSD alert history table"><table>
+    <thead><tr><th scope="col">Time</th><th scope="col">Room</th><th scope="col">Object</th><th scope="col">Score</th><th scope="col">Status</th></tr></thead>
+    <tbody id="ssd-alert-history"></tbody>
+  </table></div>
+</section>
+<p class="muted">This page updates automatically. Repeated pen detections in the same camera generation are grouped with a ten-second cooldown.</p>
+{% endblock %}

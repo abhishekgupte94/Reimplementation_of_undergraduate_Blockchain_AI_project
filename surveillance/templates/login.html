@@ -1,0 +1,17 @@
+{% extends 'auth_layout.html' %}
+{% block title %}{{ 'Administrator' if admin_login else 'Participant' }} login · Blocka.i{% endblock %}
+{% block auth_title %}{{ 'Administrator' if admin_login else 'Participant' }} login{% endblock %}
+{% block auth_description %}
+  {% if admin_login %}Review room activity, ask the chatbot, and manage SSD alerts.
+  {% else %}Open your face profile and the two simulated room cameras.{% endif %}
+{% endblock %}
+{% block auth_card_title %}Sign in{% endblock %}
+{% block auth_form %}
+  <form method="post" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Username <input name="username" autocomplete="username" required maxlength="64"></label>
+    <label>Password <input name="password" type="password" autocomplete="current-password" required maxlength="128"></label>
+    <button type="submit">Log in</button>
+  </form>
+  {% if not admin_login %}<p>New participant? <a href="{{ url_for('auth.register') }}">Create an account</a>.</p>{% endif %}
+{% endblock %}

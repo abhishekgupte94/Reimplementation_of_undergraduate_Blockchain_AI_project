@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% block title %}Room cameras · Blocka.i{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='camera.js') }}" defer></script>{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <p class="eyebrow">Participant workspace</p>
+  <h1>Simulated room cameras</h1>
+  <p>Both rooms use this device’s webcam. Time starts counting once your face is recognised in the selected room.</p>
+</div>
+<section class="panel camera-card">
+  <div class="tabs" role="tablist" aria-label="Simulated room">
+    <button id="room-1" role="tab" aria-selected="true" aria-controls="camera-panel" type="button" data-room="1">Room 1</button>
+    <button id="room-2" role="tab" aria-selected="false" aria-controls="camera-panel" type="button" data-room="2">Room 2</button>
+  </div>
+  <div id="camera-panel" role="tabpanel" aria-labelledby="room-1">
+    <h2 id="room-heading">Room 1 · Camera slot 1</h2>
+    <div class="camera-layout">
+      <div class="video-wrap"><video id="webcam" autoplay playsinline muted></video><canvas id="overlay" aria-label="Face recognition boxes"></canvas></div>
+      <div class="camera-controls">
+        <h3>Capture controls</h3>
+        <div class="actions"><button id="start-camera" type="button">Start webcam</button><button id="stop-camera" class="secondary" type="button" disabled>Stop webcam</button></div>
+        <div class="camera-readout">
+          <h3>Face tracking</h3>
+          <p id="camera-status" role="status" aria-live="polite">Complete face enrollment before starting.</p>
+          <h3>SSD simulation</h3>
+          <p id="weapon-status" role="status" aria-live="polite">The SSD simulation looks for a pen alongside face tracking.</p>
+        </div>
+        <p class="muted">Two matching frames confirm presence. Gaps up to three seconds count toward the same visit. Leaving the page stops capture.</p>
+        {% if not request.is_secure and request.host.split(':')[0] not in ('localhost', '127.0.0.1') %}
+          <p class="notice">Open the app over trusted HTTPS to use this device’s webcam.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

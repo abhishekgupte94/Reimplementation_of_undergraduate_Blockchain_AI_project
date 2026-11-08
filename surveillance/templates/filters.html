@@ -1,0 +1,6 @@
+<label>Participant
+  <select name="user_id" id="user-id" {% if not participants %}disabled{% endif %}>
+    {% for user in participants %}<option value="{{ user.id }}" {% if selected_user and selected_user.id == user.id %}selected{% endif %}>{{ user.display_name }} ({{ user.username }})</option>{% endfor %}
+  </select>
+</label>
+<label>Date <input type="date" id="report-day" name="day" value="{{ day }}" required></label>

@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% block title %}Face enrollment · Blocka.i{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='enrollment.js') }}" defer></script>{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <p class="eyebrow">Participant workspace</p>
+  <h1>Face enrollment</h1>
+  <p>Add at least three different photos of yourself, each with one clear face. Vary the angle and lighting.</p>
+</div>
+<div class="panel-grid enrollment-grid">
+<section class="panel" aria-labelledby="upload-heading">
+  <h2 id="upload-heading">Add photographs</h2>
+  <form id="upload-form" class="stack" enctype="multipart/form-data">
+    <label>JPEG or PNG photographs <input id="photos" name="photos" type="file" accept="image/jpeg,image/png" multiple required></label>
+    <p class="muted">Up to 5 MB per photograph, 20 files and 25 MB per upload.</p>
+    <button id="upload-button" type="submit">Upload photographs</button>
+  </form>
+  <div id="upload-result" role="status" aria-live="polite"></div>
+</section>
+<section class="panel training-panel">
+  <h2>Training status</h2>
+  <p id="training-status" role="status" aria-live="polite">Checking your face profile…</p>
+  <div class="actions">
+    <button id="retry-training" class="secondary" type="button">Queue training again</button>
+    <a id="camera-link" class="button" href="{{ url_for('camera.index') }}">Open room cameras</a>
+  </div>
+</section>
+</div>
+<section class="panel full-panel">
+  <h2>Your accepted photographs</h2>
+  <div class="photos" id="accepted-photos">
+    {% for image in images %}<figure><img src="{{ url_for('enrollment.photo', image_id=image.id) }}" alt="Your enrollment photograph {{ loop.index }}"><figcaption>{{ image.original_name }}</figcaption></figure>
+    {% else %}<p>No photographs accepted yet.</p>{% endfor %}
+  </div>
+</section>
+{% endblock %}

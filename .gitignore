@@ -1,0 +1,67 @@
+# Local configuration and credentials
+.env
+.env.*
+!/.env.example
+!/.env.demo.example
+.envrc
+*.pem
+*.key
+*.p12
+*.pfx
+mysql-admin.json
+mysql-app.json
+
+# Runtime state, backups and biometric data
+/instance/
+/uploads/
+/enrollment-photos/
+/backups/
+/*.sql
+anvil-state*.json
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.sqlite3-*
+*.dump
+*.sql.gz
+*.bak
+*.backup
+*.log
+
+# Downloaded weights and fitted recognizers
+*.t7
+*.pb
+*.onnx
+*.joblib
+*.pkl
+*.pickle
+*.pt
+*.pth
+*.safetensors
+
+# Dependencies, caches and builds
+.venv/
+venv/
+node_modules/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+
+# Local editor files and generated previews
+.DS_Store
+.idea/
+.vscode/
+/docs/login-preview.png
+/docs/integrated-preview.png

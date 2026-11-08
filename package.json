@@ -1,0 +1,10 @@
+{
+  "name": "room-surveillance-local-ledger",
+  "private": true,
+  "scripts": {
+    "ledger:node": "node node_modules/@foundry-rs/anvil/bin.mjs --host 127.0.0.1 --port 8545 --chain-id 31337 --accounts 1 --state instance/private/chain/anvil-state.json --state-interval 1 --preserve-historical-states --no-cors --quiet"
+  },
+  "devDependencies": {
+    "@foundry-rs/anvil": "1.7.1"
+  }
+}

@@ -1,0 +1,16 @@
+{% extends 'auth_layout.html' %}
+{% block title %}Create an account · Blocka.i{% endblock %}
+{% block auth_title %}Join as a participant{% endblock %}
+{% block auth_description %}Create an account to enroll your face profile and try room capture.{% endblock %}
+{% block auth_card_title %}Create a participant account{% endblock %}
+{% block auth_form %}
+  <form method="post" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Display name <input name="display_name" autocomplete="name" required maxlength="100"></label>
+    <label>Username <input name="username" autocomplete="username" required minlength="3" maxlength="64" pattern="[a-z0-9_.\-]+"></label>
+    <label>Password <input name="password" type="password" autocomplete="new-password" required minlength="10" maxlength="128"></label>
+    <p class="muted">Use at least 10 characters. Choose a unique lowercase username.</p>
+    <button type="submit">Create account</button>
+  </form>
+  <p class="muted">Already registered? <a href="{{ url_for('auth.login') }}">Log in</a>.</p>
+{% endblock %}

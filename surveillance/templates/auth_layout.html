@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block page_class %}auth-page{% endblock %}
+{% block main_class %}shell auth-main{% endblock %}
+{% block content %}
+<div class="auth-layout">
+  <div class="auth-aside">
+    <p class="eyebrow">Blocka.i workspace</p>
+    <h1>{% block auth_title %}{% endblock %}</h1>
+    <p>{% block auth_description %}{% endblock %}</p>
+    <a href="{{ url_for('index') }}">← Back to home</a>
+  </div>
+  <section class="panel auth-card" aria-labelledby="auth-card-title">
+    <h2 id="auth-card-title">{% block auth_card_title %}{% endblock %}</h2>
+    {% block auth_form %}{% endblock %}
+  </section>
+</div>
+{% endblock %}

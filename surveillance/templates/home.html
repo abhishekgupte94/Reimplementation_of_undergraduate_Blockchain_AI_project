@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{% block page_class %}home-page{% endblock %}
+{% block main_class %}home-main{% endblock %}
+{% block content %}
+<section class="home-hero" aria-labelledby="home-title">
+  <div class="shell hero-inner">
+    <div class="hero-copy">
+      <p class="eyebrow">2019 project rebuild</p>
+      <h1 id="home-title">Room<br>surveillance<span>.</span></h1>
+      <div class="actions hero-actions">
+        <a class="button" href="{{ url_for('auth.login') }}">Participant login</a>
+        <a class="button secondary" href="{{ url_for('auth.register') }}">Create account</a>
+      </div>
+      <a class="hero-admin" href="{{ url_for('auth.admin_login') }}">Open administrator login <span aria-hidden="true">↗</span></a>
+    </div>
+  </div>
+</section>
+{% endblock %}

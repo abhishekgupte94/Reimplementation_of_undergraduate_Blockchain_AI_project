@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+{% block title %}Activity chatbot · Blocka.i{% endblock %}
+{% block scripts %}
+<link rel="stylesheet" href="{{ url_for('static', filename='chatbot.css') }}">
+<script src="{{ url_for('static', filename='chatbot.js') }}" defer></script>
+{% endblock %}
+{% block content %}
+<div class="chat-page">
+  <div class="page-heading">
+    <p class="eyebrow">Administrator workspace</p>
+    <h1>Activity chatbot</h1>
+    <p>Look up recorded room time, confirmed visits, and the latest sighting for a participant.</p>
+  </div>
+
+  <form id="chat-form" class="panel chat-panel" method="post" action="{{ url_for('admin.chat') }}">
+    <section class="chat-scope" aria-labelledby="chat-scope-heading">
+      <h2 id="chat-scope-heading">Report filters</h2>
+      <div class="chat-filters">{% include 'filters.html' %}</div>
+      <p class="muted">Each answer uses the participant and date selected above.</p>
+    </section>
+
+    <section class="chat-thread" aria-labelledby="chat-thread-heading">
+      <h2 id="chat-thread-heading">Conversation</h2>
+      <p id="chat-empty" class="chat-empty">
+        {% if participants %}Choose a suggested question or type your own to get started.
+        {% else %}Questions will be available once a participant registers.{% endif %}
+      </p>
+      <div id="conversation" class="chat-conversation" role="log" aria-labelledby="chat-thread-heading"></div>
+    </section>
+
+    <fieldset id="chat-compose" class="chat-compose" {% if not participants %}disabled{% endif %}>
+      <legend class="muted">Suggested questions</legend>
+      <div class="chat-prompts">
+        <button type="button" class="secondary" data-question="How much time in each room?">Time in each room</button>
+        <button type="button" class="secondary" data-question="Compare rooms">Compare rooms</button>
+        <button type="button" class="secondary" data-question="Show visits">Show visits</button>
+        <button type="button" class="secondary" data-question="When was the participant last seen?">Last seen</button>
+      </div>
+      <label for="question">Your question</label>
+      <div class="chat-input">
+        <input id="question" name="question" maxlength="500" required placeholder="How much time in each room?">
+        <button type="submit">Ask</button>
+      </div>
+    </fieldset>
+  </form>
+</div>
+{% endblock %}
