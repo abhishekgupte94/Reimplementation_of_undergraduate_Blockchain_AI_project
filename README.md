@@ -1,12 +1,27 @@
-# Block A.I
+# Block A.I (original codebase re-build)
+This repository contains a reconstructed codebase of my 4th year engineering project from 2019. It has been created by me, one of the 4 participants with the help of Codex, through surviving project materials as the original repository is unavailable. I have attached in this repo, the original college-submitted PDF, the original powerpoint presentation and a new video of myself demonstrating usage. 
+The project was an early experiment into automated surveillance detection. It was presented as a demonstrator of coding skills that involved implementation of an end-to-end unsupervised Machine Learing / Deep Learning pipeline, complex Flask-based web development, blockchain-based storage systems.
+It was solely meant for demonstrating capability, and was entirely an abstract concept.
 
-A local rebuild of a 2019 surveillance demonstration. Participants enroll photos and use one webcam to simulate arrivals in two rooms. Administrators can compare arrival counts, ask the activity chatbot about arrivals and estimated facial expressions, and review alerts from an SSD pen detection simulation.
+For the demonstration to work, I have substituted the Raspberry Pi webcam setup with two tabs in the browser that represent each of the cameras. Everything else, save the web design, remains the same in princple.
 
-Flask serves the app, MySQL stores operational records, and a local Anvil development chain anchors audit hashes. Face, expression and pen inference run locally through OpenCV. The demo can run offline after setup.
+
+## Working (basic + diagram)
+
+![Project process flowchart](docs/process_rebuild.png)
+
+**The objective of the project was to monitor two cameras, attached to a Raspberry Pi board, for signs of unrecognised people in a hypothetical workspace; ultimately optimise/allocate room resources while invariably detecting presence of a weapon.**
+
+Participants are expected to sign up, upload a few headshots, and show up in either of the two cameras. THe cameras would log the timestamp of their arrival, recognise the person and save their name alongwith, to a blockchain-based MySQL data ledger.  
+A chief admin would query the whereabouts of any person ("Where is John Doe?"), discover percentage of time spent by the overall sample body in each of the rooms, and get alerts for detected weapons.
+As a bonus feature, emotion detection, which was novel at the time of release was also implemented in the project.
+
 
 ## Set up a fresh checkout
 
-The integrated launcher has been tested on macOS with **Python 3.13**, **Node.js and npm**, and **MySQL 8.4**. Install MySQL with Homebrew, then run the remaining commands from the checkout root.
+Participants enroll photos and use one webcam to simulate arrivals in two rooms. Administrators can compare arrival counts, ask the activity chatbot about arrivals and estimated facial expressions, and review alerts from an SSD pen detection simulation.
+
+Follow the instructions to setup the models, environment and create an administrator.
 
 ```sh
 brew install mysql@8.4
@@ -27,7 +42,7 @@ The model download commands verify checksums and store weights under `instance/p
 
 ## Run the demo
 
-For an existing checkout, stop the demo and run `flask --app surveillance db upgrade` with the configured MySQL server running. Run `flask --app surveillance download-emotions` before restarting to enable expression labels.
+For an existing demo, stop the demo and run `flask --app surveillance db upgrade` with the configured MySQL server running. Run `flask --app surveillance download-emotions` before restarting to enable expression labels.
 
 ```sh
 source .venv/bin/activate
@@ -69,17 +84,6 @@ Open `https://<certificate hostname or IP>:5001` and grant webcam access when pr
 
 Use separate browser profiles for simultaneous participant and administrator logins because tabs in one profile share the same login cookie. Only one capture session can own the demonstration webcam at a time, across accounts and pages.
 
-## Recognition and room arrivals
-
-- Haar locates faces. A shared preprocessing path converts each crop to the OpenFace 96×96 input and normalizes its 128-dimensional embedding. Enrollment accepts one face per photo; live frames can recognise multiple enrolled people.
-- One enrolled identity uses nearest-sample embedding distance. With two or more eligible identities, a linear `SVC(C=1)` chooses the identity and must agree with the nearest enrolled sample. A distance gate rejects unfamiliar faces in both modes. Identity always comes from recognition, not the login account.
-- `MATCH_DISTANCE=0.8` is the configurable starting L2-distance threshold for normalized embeddings. It is a demonstration setting, not a measured accuracy guarantee. Lower it to reduce false matches or add more varied enrollment photos. With only three photos, lighting and pose have a substantial effect. SVC probabilities are deliberately not presented as calibrated confidence scores.
-- Browser capture samples about twice per second and sends one request at a time. The server checks the session owner, random token, room generation, and increasing frame sequence. A room switch requires fresh recognition in the new room.
-- A repeated, byte-identical frame can reuse a single recognised face result in the same capture and room generation when the model and matching threshold agree. The preview draws a box and name for detected faces.
-- Two consecutive matches confirm an arrival, recorded at the timestamp of the first match. The first confirmed room and each confirmed change of room add one arrival. A person keeps their last known room through camera misses, same-room reappearances, capture stops and restarts.
-- Hidden pages, navigation, logout, camera shutdown and disconnects stop capture. A missing heartbeat expires the capture lease after five seconds.
-- Arrival timestamps are stored in UTC with microsecond precision. Display and date filters use `Europe/Dublin`, including daylight-saving transitions. Each arrival counts on its local calendar date. The pie chart shows each room's share of the total arrival count.
-
 ## Facial expression estimates
 
 OpenCV Zoo's Progressive Teacher model uses MobileFaceNet to classify expressions. YuNet aligns the face inside an existing Haar crop. Both models together use about 5 MB of weight files and run through the existing OpenCV installation. [Expression model and Apache 2.0 license](https://github.com/opencv/opencv_zoo/tree/main/models/facial_expression_recognition) · [YuNet and MIT license](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet)
@@ -88,26 +92,6 @@ The camera overlay shows **neutral**, **happy**, **sad**, **angry** or **surpris
 
 MySQL stores the first accepted estimate and subsequent label changes for a recognised participant in each capture room generation. Each record includes the sample timestamp, room and model version. The chatbot reports the recorded estimate with its room and time. Expression samples are separate from arrival counts.
 
-## MySQL, audit ledger and SSD alerts
-
-MySQL supplies the data for charts and chatbot responses. Room arrivals, expression observations and weapon alert changes write canonical, hash-linked audit snapshots and a durable outbox in the same SQL transaction. A separate worker anchors the hash commitments to the local development chain. Chain outages do not block camera requests.
-
-```sh
-flask --app surveillance ledger-status
-flask --app surveillance ledger-verify
-flask --app surveillance ledger-verify --chain
-```
-
-Verification checks stored audit hashes and their links, reconciles the latest snapshots against operational rows, and can verify mined blockchain commitments. Anvil is a single-node, resettable development blockchain; this demonstration provides tamper evidence while its history remains intact, not independent-validator guarantees. See [the full design and its sources](docs/mysql-ledger.md).
-
-The SSD subsystem uses TensorFlow's **MobileNet V2 SSD** trained on Open Images V4 and accepts only its **Pen** class for the simulation. It samples frames in one background worker and discards results from ended or expired captures and previous room generations. Signed-in administrators receive a live prompt on visible admin pages through a three-second fetch poll. Alert history and acknowledgement are available under **SSD alerts**.
-
-```sh
-flask --app surveillance weapon-smoke
-flask --app surveillance weapon-smoke --image instance/private/models/weapons/pen-test.jpg --expect Pen
-```
-
-The smoke command checks a labeled example without writing presence or alert records. Model provenance and sample attribution are in [SSD pen simulation](docs/weapon-detection.md).
 
 ## Architecture and interfaces
 
