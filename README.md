@@ -1,5 +1,5 @@
 # Block A.I (original codebase re-build)
-This repository contains a reconstructed codebase of my 4th year engineering project from 2019. It has been created by me, one of the 4 participants with the help of Codex, through surviving project materials as the original repository is unavailable. I have attached in this repo, the original college-submitted PDF, the original powerpoint presentation and a new video of myself demonstrating usage. 
+This repository contains a reconstructed codebase of my 4th year engineering project from 2019. It has been created by me, one of the 4 participants with the help of Codex, through surviving project materials as the original repository is unavailable. I have attached in this repo the original college-submitted PDF describing in detail the implementation of the original project work.
 The project was an early experiment into automated surveillance detection. It was presented as a demonstrator of coding skills that involved implementation of an end-to-end unsupervised Machine Learing / Deep Learning pipeline, complex Flask-based web development, blockchain-based storage systems.
 It was solely meant for demonstrating capability, and was entirely an abstract concept.
 
